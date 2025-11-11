@@ -1,0 +1,21 @@
+schema_version: 1
+extends: ../../policy/question/global.yaml
+notes: "Timberwolf academy prefers collecting player_level and enforces toe-depth policy."
+quick_fit:
+  required: [pitch_type, preferred_pickup]
+  optional: [target_weight_lb, player_level]
+ask_rules:
+  - id: close_scores
+    when: "top2_score_gap < 5"
+    ask: dominant_shot_area
+  - id: toe_policy
+    when: "flags contains 'toe_depth_policy'"
+    ask: durability_bias
+    reason: "Their pressing limits require knowing if durability can trump rebound."
+  - id: pickup_alignment
+    when: "tenant_policy == 'prefer_balanced_pickup' and preferred_pickup == 'heavy'"
+    ask: pickup_priority
+    reason: "Check if user truly insists on heavy pickup despite tenant preference."
+limits:
+  max_questions_total: 5
+  max_followups_after_reco: 2

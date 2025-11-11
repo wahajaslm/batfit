@@ -1,0 +1,11 @@
+mix:
+  - file: t1_parse/train.jsonl
+    weight: 1.0
+  - file: t2_repair/train.jsonl
+    weight: 1.0
+  - file: tenants/timberwolf/t1_parse.train.jsonl
+    weight: 0.3
+
+val:
+  - file: t1_parse/val.jsonl
+  - file: t2_repair/val.jsonl

@@ -1,0 +1,5 @@
+FROM tinyllama:latest
+ADAPTER ../fine-tune/outputs/batfit
+SYSTEM Output ONLY one JSON object following the BatFit schema. No prose.
+PARAMETER temperature 0.0
+PARAMETER num_ctx 1024

@@ -1,0 +1,26 @@
+context_order:
+  - target_weight_lb
+  - target_weight_g
+  - profile_pref
+  - pickup_goal
+  - preferred_pickup
+  - pitch_type
+  - playing_style
+  - dominant_shot_area
+  - player_level
+  - durability_bias
+  - pickup_priority
+  - budget
+optional_fields:
+  target_weight_g:
+    description: "Original metric weight in grams when the user supplies it."
+  budget:
+    description: "Normalized budget; always express as {amount, currency:'USD'} regardless of user locale."
+  willow_pref:
+    description: "Only include when the user explicitly states willow type."
+  tenant_bias:
+    description: "Tenant-specific hints or overrides."
+notes:
+  - "Always convert weights given in grams/kg to pounds (target_weight_lb) and store the raw grams in target_weight_g."
+  - "Normalize every budget to USD using reasonable FX assumptions; keep currency fixed to 'USD'."
+  - "Do not invent optional fields; only output them when inferred confidently."

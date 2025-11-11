@@ -1,0 +1,20 @@
+{
+  "$schema":"http://json-schema.org/draft-07/schema#",
+  "title":"BatFitPayload",
+  "type":"object",
+  "required":["player_type","sweet_spot","handle","pickup"],
+  "properties":{
+    "player_type":{"type":"string","enum":["opener","middle_order","finisher","front_foot","back_foot","balanced","all_rounder"]},
+    "preferred_weight_lb":{"type":"number"},
+    "weight_lb_range":{"type":"array","items":{"type":"number"},"minItems":2,"maxItems":2},
+    "sweet_spot":{"type":"string","enum":["low","mid_low","mid","mid_high","high"]},
+    "pickup":{"type":"string","enum":["light","medium","quick","neutral","heavy"]},
+    "profile":{"type":"string","enum":["full","slight_concave","concave","duckbill"]},
+    "face":{"type":"string","enum":["flat","semi_flat","rounded"]},
+    "edges_mm":{"type":["integer","string"]},
+    "handle":{"type":"string","enum":["oval","semi_oval","round"]},
+    "willow":{"type":"string","enum":["english","kashmir"]},
+    "notes":{"type":"string"}
+  },
+  "additionalProperties":false
+}

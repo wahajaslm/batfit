@@ -1,0 +1,30 @@
+# Question policy governs what the UX collects before handing context to KERN.
+# It supports a global baseline plus optional tenant-specific overrides.
+schema_version: 1
+
+# Global defaults applied when no tenant override file is provided.
+global:
+  quick_fit:
+    description: "Minimal fields required before first KERN pass"
+    required: [pitch_type, preferred_pickup]
+    optional: [target_weight_lb]
+  ask_rules:
+    - id: close_scores
+      when: "top2_score_gap < 5"
+      ask: dominant_shot_area
+      reason: "Differentiate front-foot vs back-foot bias when catalog ranks are tight."
+    - id: low_mass_edge_risk
+      when: "flags contains 'low_mass_high_edge_risk'"
+      ask: durability_bias
+      reason: "Clarify whether user prefers durability or rebound when weight-edge request is risky."
+    - id: pickup_mismatch
+      when: "apparent_pickup_lb > target_weight_lb + 0.08"
+      ask: pickup_priority
+      reason: "Confirm if they prefer lighter feel or more power when pickup conflicts with weight target."
+    - id: no_catalog_fit
+      when: "no_catalog_fit"
+      ask: profile_pref
+      reason: "When catalog cannot satisfy request, capture the desired profile for custom spec."
+  limits:
+    max_questions_total: 4
+    max_followups_after_reco: 2
