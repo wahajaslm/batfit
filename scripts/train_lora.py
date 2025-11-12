@@ -20,7 +20,14 @@ from typing import Dict, List, Optional, Tuple
 import sys
 import types
 
-import torch
+try:
+    import torch
+except ModuleNotFoundError as exc:
+    raise SystemExit(
+        "PyTorch is not installed. Run `python3 -m pip install -r requirements.txt` "
+        "or `make setup` before executing this script."
+    ) from exc
+
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
 
