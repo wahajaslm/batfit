@@ -1,9 +1,14 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
 accelerate==1.10.1
 transformers==4.46.3
 peft==0.17.1
 datasets==4.4.1
+torch==2.8.0+cu126 ; platform_system == "Linux"
+torch==2.8.0 ; platform_system != "Linux"
+torchvision==0.23.0+cu126 ; platform_system == "Linux"
+torchaudio==2.8.0+cu126 ; platform_system == "Linux"
 bitsandbytes==0.44.1 ; platform_system == "Linux"
-triton==2.2.0 ; platform_system == "Linux"
+triton==3.4.0 ; platform_system == "Linux"
 sentencepiece
 scipy
 pyyaml
