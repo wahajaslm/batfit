@@ -1,14 +1,18 @@
 --extra-index-url https://download.pytorch.org/whl/cu126
+
 axolotl ; platform_system == "Linux"
 transformers==4.46.3
 peft
 datasets
 accelerate
-torch==2.8.0+cu126 ; platform_system == "Linux"
-torch==2.8.0 ; platform_system != "Linux"
-torchvision==0.23.0+cu126 ; platform_system == "Linux"
-torchaudio==2.8.0+cu126 ; platform_system == "Linux"
-bitsandbytes==0.44.1 ; platform_system == "Linux"
-triton==3.4.0 ; platform_system == "Linux"
+
+torch==2.8.0+cu126 ; platform_system == "Linux" and platform_machine == "x86_64"
+torch==2.8.0 ; platform_system != "Linux" or platform_machine != "x86_64"
+torchvision==0.23.0+cu126 ; platform_system == "Linux" and platform_machine == "x86_64"
+torchaudio==2.8.0+cu126 ; platform_system == "Linux" and platform_machine == "x86_64"
+
+bitsandbytes==0.44.1 ; python_version < "3.12" and platform_system == "Linux" and platform_machine == "x86_64"
+triton==3.4.0 ; platform_system == "Linux" and platform_machine == "x86_64"
+
 jsonschema==4.23.0
 pyyaml
