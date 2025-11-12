@@ -20,6 +20,13 @@ If you prefer a hosted GPU, open `notebooks/train_batfit.ipynb` in Google Colab 
 
 The notebook assumes this repo is cloned in `/content`; if not, add a `git clone` cell at the top and `cd` into the project directory before training.
 
+### MLflow tracking (optional)
+The training script now mirrors the [MLflow + Transformers PEFT workflow](https://mlflow.org/docs/latest/ml/deep-learning/transformers/tutorials/fine-tuning/transformers-peft/):
+
+- Set `BATFIT_ENABLE_MLFLOW=1` (default) to automatically start a run, log hyperparameters, metrics, and persist the LoRA adapter folder as an artifact. Disable by exporting `BATFIT_ENABLE_MLFLOW=0`.
+- Configure `BATFIT_MLFLOW_TRACKING_URI`, `BATFIT_MLFLOW_EXPERIMENT`, and `BATFIT_MLFLOW_RUN_NAME` to point at your tracking server (or keep the defaults for the local `mlruns` directory).
+- All integration lives inside `scripts/train_lora.py`, so the CLI, notebook, and Colab pathways share identical logging behavior.
+
 ## LLM vs KERN contract
 - Fine-tuned LLM = translator: map cricket talk into normalized **context + interaction** JSON, never physical geometry.
 - KERN = deterministic engine: reads that context, applies physics/feasibility, and emits the final bat spec.

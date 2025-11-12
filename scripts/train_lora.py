@@ -10,13 +10,17 @@ Workflow:
 6. Train, then persist only the LoRA adapter weights plus the tokenizer to OUTPUT_DIR.
 """
 
+import contextlib
+import datetime
 import json
 import math
 import os
 import random
+import warnings
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import importlib.machinery
 import sys
 import types
 
@@ -30,6 +34,10 @@ except ModuleNotFoundError as exc:
 
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
+try:
+    import mlflow
+except Exception:
+    mlflow = None
 
 
 def _ensure_bitsandbytes_stub() -> None:
@@ -40,6 +48,7 @@ def _ensure_bitsandbytes_stub() -> None:
     except Exception:
         stub = types.ModuleType("bitsandbytes")
         stub.__version__ = "0.0.0-stub"
+        stub.__spec__ = importlib.machinery.ModuleSpec("bitsandbytes", loader=None)
         sys.modules["bitsandbytes"] = stub
 
 
@@ -53,6 +62,47 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+
+
+@contextlib.contextmanager
+def mlflow_run(params: Dict[str, str]):
+    """Context manager that logs params/metrics if MLflow is enabled."""
+    if not MLFLOW_ENABLED or mlflow is None:
+        yield None
+        return
+    try:
+        if MLFLOW_TRACKING_URI:
+            mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+        if MLFLOW_EXPERIMENT:
+            mlflow.set_experiment(MLFLOW_EXPERIMENT)
+        run_name = MLFLOW_RUN_NAME or f"batfit-{Path(BASE_MODEL).name}-{datetime.datetime.utcnow():%Y%m%d-%H%M%S}"
+        with mlflow.start_run(run_name=run_name) as active_run:
+            mlflow.log_params(params)
+            yield active_run
+    except Exception as exc:  # pragma: no cover - logging fallback
+        warnings.warn(f"Disabling MLflow logging due to error: {exc}")
+        yield None
+
+
+def _log_mlflow_metrics(metrics: Dict[str, float]) -> None:
+    if not metrics or mlflow is None:
+        return
+    try:
+        mlflow.log_metrics(metrics)
+    except Exception as exc:  # pragma: no cover - logging fallback
+        warnings.warn(f"Failed to log MLflow metrics: {exc}")
+
+
+def _log_mlflow_artifact(path: Path, artifact_path: Optional[str] = None) -> None:
+    if mlflow is None:
+        return
+    try:
+        if path.is_dir():
+            mlflow.log_artifacts(str(path), artifact_path=artifact_path)
+        elif path.is_file():
+            mlflow.log_artifact(str(path), artifact_path=artifact_path)
+    except Exception as exc:  # pragma: no cover - logging fallback
+        warnings.warn(f"Failed to log MLflow artifact {path}: {exc}")
 
 # ------------------ Config (env) ------------------
 # Every knob can be overridden via BATFIT_* env vars so CI, notebooks, and local runs match.
@@ -76,6 +126,10 @@ TARGET_MODULES = os.getenv(
 ).split(",")
 
 SYSTEM_PROMPT = os.getenv("BATFIT_SYSTEM_PROMPT", "").strip()
+MLFLOW_ENABLED = os.getenv("BATFIT_ENABLE_MLFLOW", "1").lower() not in {"0", "false", "no"}
+MLFLOW_TRACKING_URI = os.getenv("BATFIT_MLFLOW_TRACKING_URI", "").strip()
+MLFLOW_EXPERIMENT = os.getenv("BATFIT_MLFLOW_EXPERIMENT", "batfit-ft").strip()
+MLFLOW_RUN_NAME = os.getenv("BATFIT_MLFLOW_RUN_NAME", "").strip()
 
 
 def resolve_system_prompt() -> str:
@@ -219,9 +273,14 @@ def build_prompt(input_text: str, tokenizer: AutoTokenizer, system_prompt_text: 
             {"role": "user", "content": input_text},
             {"role": "assistant", "content": ""},
         ]
-        prompt = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=False
-        )
+        if getattr(tokenizer, "chat_template", None):
+            prompt = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=False
+            )
+        else:
+            prompt = "".join(
+                f"<|{m['role']}|>\n{m['content']}\n" for m in messages
+            )
 
     tokenized = tokenizer(
         prompt,
@@ -358,11 +417,44 @@ def main(run_training: bool = True) -> Trainer:
     _, use_mps, device_map, dtype = resolve_device()
     model = prepare_model(BASE_MODEL, dtype, device_map, use_mps)
     trainer = build_trainer(model, tokenizer, train_tokenized, val_tokenized)
-    if run_training:
-        trainer.train()
-        trainer.save_model()
-        tokenizer.save_pretrained(str(OUTPUT_DIR))
-        print(f"Saved LoRA adapter + tokenizer to {OUTPUT_DIR}")
+    run_params = {
+        "base_model": BASE_MODEL,
+        "max_seq_len": MAX_SEQ_LEN,
+        "epochs": EPOCHS,
+        "learning_rate": LEARNING_RATE,
+        "micro_batch": MICRO_BATCH,
+        "grad_accum": GRAD_ACCUM,
+        "lora_r": LORA_R,
+        "lora_alpha": LORA_ALPHA,
+        "train_rows": len(train_raw),
+        "val_rows": len(val_raw) if val_raw is not None else 0,
+    }
+    params_as_str = {k: str(v) for k, v in run_params.items()}
+    with mlflow_run(params_as_str) as active_mlflow:
+        if run_training:
+            train_output = trainer.train()
+            trainer.save_model()
+            tokenizer.save_pretrained(str(OUTPUT_DIR))
+            print(f"Saved LoRA adapter + tokenizer to {OUTPUT_DIR}")
+            metrics_to_log: Dict[str, float] = {}
+            if hasattr(train_output, "metrics"):
+                for key, value in train_output.metrics.items():
+                    if isinstance(value, (int, float)):
+                        metrics_to_log[key] = float(value)
+            metrics_to_log["train_samples"] = len(train_tokenized)
+            if active_mlflow:
+                _log_mlflow_metrics(metrics_to_log)
+                if val_tokenized is not None:
+                    eval_metrics = trainer.evaluate()
+                    eval_numeric = {
+                        key: float(val)
+                        for key, val in eval_metrics.items()
+                        if isinstance(val, (int, float))
+                    }
+                    _log_mlflow_metrics(eval_numeric)
+                _log_mlflow_artifact(OUTPUT_DIR, artifact_path="adapters")
+                if MANIFEST.exists():
+                    _log_mlflow_artifact(MANIFEST, artifact_path="config")
     return trainer
 
 

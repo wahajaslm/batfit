@@ -5,6 +5,7 @@ transformers==4.46.3
 peft
 datasets
 accelerate
+mlflow>=2.16.0
 
 torch==2.8.0+cu126 ; platform_system == "Linux" and platform_machine == "x86_64"
 torch==2.8.0 ; platform_system != "Linux" or platform_machine != "x86_64"
