@@ -1,7 +1,7 @@
 accelerate==1.10.1
 transformers==4.46.3
 peft==0.17.1
-datasets==4.4.1
+datasets==5.0.0
 bitsandbytes==0.44.1
 triton==2.2.0
 sentencepiece
