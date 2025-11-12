@@ -53,6 +53,12 @@ TARGET_MODULES = os.getenv(
 SYSTEM_PROMPT = os.getenv("BATFIT_SYSTEM_PROMPT", "").strip()
 
 
+def resolve_system_prompt() -> str:
+    """Load the system prompt using env/file fallback logic so notebooks can reuse it."""
+    sys_prompt_file = DATA_DIR / "common" / "prompts" / "system.txt"
+    return SYSTEM_PROMPT or _read_text_if_exists(sys_prompt_file)
+
+
 # ------------------ Data loading ------------------
 def _read_text_if_exists(path: Path) -> str:
     """Return file text if it exists, otherwise an empty string to keep callers simple."""
@@ -201,25 +207,24 @@ def build_prompt(input_text: str, tokenizer: AutoTokenizer, system_prompt_text: 
     return tokenized
 
 
-# ------------------ Main ------------------
-def main() -> None:
-    """Entrypoint that wires data loading, tokenization, LoRA config, and training."""
-    random.seed(SPLIT_SEED)
-
-    sys_prompt_file = DATA_DIR / "common" / "prompts" / "system.txt"
-    # Precedence: env string > file contents > default inside build_prompt().
-    system_prompt_text = SYSTEM_PROMPT or _read_text_if_exists(sys_prompt_file)
-
-    # Load + normalize datasets according to manifest hints.
-    train_raw, val_raw = load_from_manifest()
-
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL, use_fast=True)
+def prepare_tokenizer(base_model: str = BASE_MODEL) -> AutoTokenizer:
+    """Load and pad the tokenizer once so scripts/notebooks share the exact settings."""
+    tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
+    return tokenizer
+
+
+def tokenize_splits(
+    train_raw: Dataset,
+    val_raw: Optional[Dataset],
+    tokenizer: AutoTokenizer,
+    system_prompt_text: str,
+) -> Tuple[Dataset, Optional[Dataset]]:
+    """Apply prompt building + LM formatting to raw datasets."""
 
     def _map_build(example: dict) -> dict:
-        """Turn normalized rows into padded LM training samples (prompt + label)."""
         prompt_tokens = build_prompt(example["input_text"], tokenizer, system_prompt_text)
         prompt_text = tokenizer.decode(
             prompt_tokens["input_ids"], skip_special_tokens=False
@@ -230,33 +235,43 @@ def main() -> None:
             max_length=MAX_SEQ_LEN,
             padding="max_length",
         )
-        # Standard LM loss: shift labels over the same ids so padding is ignored automatically.
         full["labels"] = full["input_ids"].copy()
         return full
 
-    # Hugging Face datasets keep things streaming-friendly; map() performs tokenization lazily.
     train_tokenized = train_raw.map(_map_build, remove_columns=train_raw.column_names)
     val_tokenized = (
         val_raw.map(_map_build, remove_columns=val_raw.column_names)
         if val_raw is not None
         else None
     )
+    return train_tokenized, val_tokenized
 
+
+def resolve_device() -> Tuple[bool, bool, Optional[str], torch.dtype]:
+    """Determine device map + dtype so CPU/MPS flows can reuse the logic."""
     use_cuda = torch.cuda.is_available()
     use_mps = torch.backends.mps.is_available() and not use_cuda
     device_map = "auto" if use_cuda else None
     dtype = torch.bfloat16 if use_cuda else torch.float32
+    return use_cuda, use_mps, device_map, dtype
 
+
+def prepare_model(
+    base_model: str,
+    dtype: torch.dtype,
+    device_map: Optional[str],
+    use_mps: bool,
+) -> torch.nn.Module:
+    """Load the base model and inject LoRA adapters."""
     model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
+        base_model,
         torch_dtype=dtype,
         device_map=device_map,
     )
     if use_mps:
         model.to("mps")
-    model.config.use_cache = False  # Needed so gradient checkpointing works for training.
+    model.config.use_cache = False
     model.gradient_checkpointing_enable()
-
     lora_config = LoraConfig(
         r=LORA_R,
         lora_alpha=LORA_ALPHA,
@@ -264,14 +279,21 @@ def main() -> None:
         target_modules=TARGET_MODULES,
         task_type="CAUSAL_LM",
     )
-    model = get_peft_model(model, lora_config)  # Inject LoRA adapters into attention blocks.
+    model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
+    return model
 
+
+def build_trainer(
+    model: torch.nn.Module,
+    tokenizer: AutoTokenizer,
+    train_dataset: Dataset,
+    val_dataset: Optional[Dataset],
+) -> Trainer:
+    """Create a Trainer configured for the current dataset split."""
     collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    # Skip evaluation entirely when no validation split exists.
-    eval_strategy = "steps" if val_tokenized is not None else "no"
-
+    eval_strategy = "steps" if val_dataset is not None else "no"
     training_args = TrainingArguments(
         output_dir=str(OUTPUT_DIR),
         per_device_train_batch_size=MICRO_BATCH,
@@ -283,26 +305,40 @@ def main() -> None:
         save_steps=50,
         save_total_limit=2,
         evaluation_strategy=eval_strategy,
-        eval_steps=50 if val_tokenized is not None else None,
+        eval_steps=50 if val_dataset is not None else None,
         report_to="none",
         bf16=False,
         fp16=False,
     )
-
-    trainer = Trainer(
+    return Trainer(
         model=model,
         args=training_args,
-        train_dataset=train_tokenized,
-        eval_dataset=val_tokenized,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
         tokenizer=tokenizer,
         data_collator=collator,
     )
 
-    # PEFT keeps base weights frozen, so only adapter + tokenizer need saving.
-    trainer.train()
-    trainer.save_model()
-    tokenizer.save_pretrained(str(OUTPUT_DIR))
-    print(f"Saved LoRA adapter + tokenizer to {OUTPUT_DIR}")
+
+# ------------------ Main ------------------
+def main(run_training: bool = True) -> Trainer:
+    """Entrypoint that wires data loading, tokenization, LoRA config, and training."""
+    random.seed(SPLIT_SEED)
+    system_prompt_text = resolve_system_prompt()
+    train_raw, val_raw = load_from_manifest()
+    tokenizer = prepare_tokenizer(BASE_MODEL)
+    train_tokenized, val_tokenized = tokenize_splits(
+        train_raw, val_raw, tokenizer, system_prompt_text
+    )
+    _, use_mps, device_map, dtype = resolve_device()
+    model = prepare_model(BASE_MODEL, dtype, device_map, use_mps)
+    trainer = build_trainer(model, tokenizer, train_tokenized, val_tokenized)
+    if run_training:
+        trainer.train()
+        trainer.save_model()
+        tokenizer.save_pretrained(str(OUTPUT_DIR))
+        print(f"Saved LoRA adapter + tokenizer to {OUTPUT_DIR}")
+    return trainer
 
 
 if __name__ == "__main__":
