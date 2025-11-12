@@ -298,12 +298,4 @@ def main() -> None:
         data_collator=collator,
     )
 
-    # PEFT keeps base weights frozen, so only adapter + tokenizer need saving.
-    trainer.train()
-    trainer.save_model()
-    tokenizer.save_pretrained(str(OUTPUT_DIR))
-    print(f"Saved LoRA adapter + tokenizer to {OUTPUT_DIR}")
-
-
-if __name__ == "__main__":
-    main()
+    # PEFT keeps base w

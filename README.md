@@ -13,7 +13,7 @@ ollama run batfit "Aggressive opener, wants 2.8 lb, mid-low SS, semi-oval handle
 ### Train on Colab
 If you prefer a hosted GPU, open `notebooks/train_batfit.ipynb` in Google Colab (File → Open Notebook → GitHub) and run the cells in order:
 
-1. Install deps via `requirements-colab.txt`.
+1. Install deps via `requirements-colab.txt` (includes `triton` + CUDA-friendly `bitsandbytes`, and pins `pyarrow==19.0.0` to avoid Colab's RAPIDS conflict).
 2. (Optional) mount Drive if you want to save checkpoints.
 3. Adjust env vars (`BATFIT_BASE_MODEL`, sequence length, epochs).
 4. Launch `python scripts/train_lora.py` straight from the repo root.
