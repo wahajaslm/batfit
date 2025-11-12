@@ -17,9 +17,27 @@ import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import sys
+import types
+
 import torch
 import yaml
 from datasets import Dataset, DatasetDict, concatenate_datasets, load_dataset
+
+
+def _ensure_bitsandbytes_stub() -> None:
+    """PEFT imports bitsandbytes even when 8-bit features are unused."""
+    try:
+        import bitsandbytes  # noqa: F401
+        return
+    except Exception:
+        stub = types.ModuleType("bitsandbytes")
+        stub.__version__ = "0.0.0-stub"
+        sys.modules["bitsandbytes"] = stub
+
+
+_ensure_bitsandbytes_stub()
+
 from peft import LoraConfig, get_peft_model
 from transformers import (
     AutoModelForCausalLM,
